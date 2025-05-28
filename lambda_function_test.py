@@ -122,22 +122,20 @@ def cleanup_temp_table(table_name):
         logger.error(f"[TEST] Error during cleanup of table {table_name}: {e}")
         raise
 
-def enable_pitr(table_name, is_restored_table=False):
+def enable_pitr(table_name):
     """
-    テーブルのPITRを有効にする関数
+    テーブルのPITRを有効にする関数（検証用：1日間の保持期間）
     
     Args:
         table_name (str): PITRを有効にするテーブル名
-        is_restored_table (bool): リストアされたテーブルかどうか
     """
     try:
-        retention_days = 1 if is_restored_table else 35
-        logger.info(f"[TEST] Enabling PITR for table {table_name} with {retention_days}-day retention...")
+        logger.info(f"[TEST] Enabling PITR for table {table_name} with 1-day retention...")
         response = dynamodb_client.update_continuous_backups(
             TableName=table_name,
             PointInTimeRecoverySpecification={
                 'PointInTimeRecoveryEnabled': True,
-                'PointInTimeRecoveryWindowInDays': retention_days
+                'PointInTimeRecoveryWindowInDays': 1
             }
         )
         logger.info(f"[TEST] PITR enabled: {response}")
@@ -149,6 +147,10 @@ def enable_pitr(table_name, is_restored_table=False):
             logger.info(f"[TEST] PITR status: {status}")
             
             if status == 'ENABLED':
+                # 保持期間の確認
+                window_days = response['ContinuousBackupsDescription']['PointInTimeRecoveryDescription'].get('PointInTimeRecoveryWindowInDays', 0)
+                if window_days != 1:
+                    raise Exception(f"PITR retention period mismatch. Expected: 1, Actual: {window_days}")
                 break
             elif status == 'ENABLING':
                 logger.info(f"[TEST] Waiting for PITR to be enabled...")
@@ -195,8 +197,11 @@ def lambda_handler(event, context):
         table_description = wait_for_table_status(temp_table_name, 'ACTIVE')
         logger.info(f"[TEST] Table {temp_table_name} restored successfully.")
 
-        # PITRを有効化（リストアされたテーブルなので1日保持）
-        enable_pitr(temp_table_name, is_restored_table=True)
+        # テーブルが完全に利用可能になるまで少し待機
+        time.sleep(WAIT_TIME)
+
+        # PITRを有効化（検証用：1日間の保持期間）
+        enable_pitr(temp_table_name)
         logger.info(f"[TEST] PITR enabled for table {temp_table_name} with 1-day retention.")
 
         # S3へのエクスポート準備
