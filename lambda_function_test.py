@@ -17,7 +17,6 @@ s3_client = boto3.client('s3')
 # 環境変数から設定値を取得
 SOURCE_TABLE_NAME = os.environ['SOURCE_TABLE_NAME']
 S3_BUCKET_NAME = os.environ['S3_BUCKET_NAME']
-S3_PREFIX = os.environ.get('S3_PREFIX', '')
 MAX_RETRIES = 3
 WAIT_TIME = 30  # 秒
 
@@ -140,14 +139,14 @@ def lambda_handler(event, context):
 
         # S3へのエクスポート準備
         export_time = datetime.now(timezone.utc)
-        s3_full_prefix = os.path.join(S3_PREFIX, 'test', temp_table_name, export_time.strftime('%Y/%m/%d/%H%M%S'))  # テスト用のパスを追加
-        logger.info(f"[TEST] Starting export to s3://{S3_BUCKET_NAME}/{s3_full_prefix}...")
+        s3_prefix = f"test/{temp_table_name}/{export_time.strftime('%Y/%m/%d/%H%M%S')}"  # テスト用のパスを追加
+        logger.info(f"[TEST] Starting export to s3://{S3_BUCKET_NAME}/{s3_prefix}...")
 
         # テーブルをS3にエクスポート
         response_export = dynamodb_client.export_table_to_point_in_time(
             TableArn=table_description['Table']['TableArn'],
             S3Bucket=S3_BUCKET_NAME,
-            S3Prefix=s3_full_prefix,
+            S3Prefix=s3_prefix,
             ExportFormat='DYNAMODB_JSON'
         )
         export_arn = response_export['ExportDescription']['ExportArn']
@@ -155,7 +154,7 @@ def lambda_handler(event, context):
 
         # エクスポート完了を待機
         export_desc = wait_for_export_completion(export_arn)
-        logger.info(f"[TEST] Export completed successfully. Manifest file: s3://{S3_BUCKET_NAME}/{s3_full_prefix}/AWSDynamoDB/{export_arn.split('/')[-1]}/manifest-summary.json")
+        logger.info(f"[TEST] Export completed successfully. Manifest file: s3://{S3_BUCKET_NAME}/{s3_prefix}/AWSDynamoDB/{export_arn.split('/')[-1]}/manifest-summary.json")
 
         # 一時テーブルの削除
         cleanup_temp_table(temp_table_name)
@@ -163,7 +162,7 @@ def lambda_handler(event, context):
         # 成功レスポンスを返却
         return {
             'statusCode': 200,
-            'body': f"Test process completed successfully. Exported to s3://{S3_BUCKET_NAME}/{s3_full_prefix}"
+            'body': f"Test process completed successfully. Exported to s3://{S3_BUCKET_NAME}/{s3_prefix}"
         }
 
     except Exception as e:
