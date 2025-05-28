@@ -4,7 +4,6 @@ import time
 import logging
 from datetime import datetime, timedelta, timezone
 from botocore.exceptions import ClientError
-from tenacity import retry, stop_after_attempt, wait_exponential
 
 # ロガーの設定
 logger = logging.getLogger()
@@ -20,7 +19,28 @@ S3_BUCKET_NAME = os.environ['S3_BUCKET_NAME']
 MAX_RETRIES = 3
 WAIT_TIME = 30  # 秒
 
-@retry(stop=stop_after_attempt(MAX_RETRIES), wait=wait_exponential(multiplier=1, min=4, max=10))
+def retry_with_backoff(func, *args, **kwargs):
+    """
+    指数バックオフを使用したリトライロジック
+    
+    Args:
+        func: 実行する関数
+        *args: 関数の引数
+        **kwargs: 関数のキーワード引数
+    
+    Returns:
+        関数の実行結果
+    """
+    for attempt in range(MAX_RETRIES):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            if attempt == MAX_RETRIES - 1:  # 最後の試行で失敗した場合
+                raise
+            wait_time = min(WAIT_TIME * (2 ** attempt), 300)  # 最大5分まで
+            logger.info(f"[TEST] Retry attempt {attempt + 1}/{MAX_RETRIES} after {wait_time} seconds...")
+            time.sleep(wait_time)
+
 def wait_for_table_status(table_name, expected_status):
     """
     テーブルのステータスが期待値になるまで待機する関数（検証用）
@@ -54,7 +74,6 @@ def wait_for_table_status(table_name, expected_status):
             logger.error(f"[TEST] Error describing table {table_name}: {e}")
             raise
 
-@retry(stop=stop_after_attempt(MAX_RETRIES), wait=wait_exponential(multiplier=1, min=4, max=10))
 def wait_for_export_completion(export_arn):
     """
     エクスポートジョブの完了を待機する関数（検証用）
@@ -125,7 +144,8 @@ def lambda_handler(event, context):
 
         # PITRを使用してテーブルをリストア
         logger.info(f"[TEST] Starting PITR restore for table {SOURCE_TABLE_NAME} to {temp_table_name}...")
-        response_restore = dynamodb_client.restore_table_to_point_in_time(
+        response_restore = retry_with_backoff(
+            dynamodb_client.restore_table_to_point_in_time,
             SourceTableName=SOURCE_TABLE_NAME,
             TargetTableName=temp_table_name,
             RestoreDateTime=restore_datetime,
@@ -143,7 +163,8 @@ def lambda_handler(event, context):
         logger.info(f"[TEST] Starting export to s3://{S3_BUCKET_NAME}/{s3_prefix}...")
 
         # テーブルをS3にエクスポート
-        response_export = dynamodb_client.export_table_to_point_in_time(
+        response_export = retry_with_backoff(
+            dynamodb_client.export_table_to_point_in_time,
             TableArn=table_description['Table']['TableArn'],
             S3Bucket=S3_BUCKET_NAME,
             S3Prefix=s3_prefix,
