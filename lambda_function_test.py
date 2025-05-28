@@ -180,28 +180,24 @@ def lambda_handler(event, context):
         logger.info(f"[TEST] Target restore datetime: {restore_datetime}")
         logger.info(f"[TEST] Temporary table name: {temp_table_name}")
 
-        # PITRを使用してテーブルをリストア（1日保持）
-        logger.info(f"[TEST] Starting PITR restore for table {SOURCE_TABLE_NAME} to {temp_table_name} with 1-day retention...")
+        # PITRを使用してテーブルをリストア
+        logger.info(f"[TEST] Starting PITR restore for table {SOURCE_TABLE_NAME} to {temp_table_name}...")
         response_restore = retry_with_backoff(
             dynamodb_client.restore_table_to_point_in_time,
             SourceTableName=SOURCE_TABLE_NAME,
             TargetTableName=temp_table_name,
             RestoreDateTime=restore_datetime,
-            UseLatestRestorableTime=False,
-            PointInTimeRecoverySpecification={
-                'PointInTimeRecoveryEnabled': True,
-                'PointInTimeRecoveryWindowInDays': 1
-            }
+            UseLatestRestorableTime=False
         )
         logger.info(f"[TEST] Restore initiated: {response_restore}")
 
         # リストア完了を待機
         table_description = wait_for_table_status(temp_table_name, 'ACTIVE')
-        logger.info(f"[TEST] Table {temp_table_name} restored successfully with 1-day PITR retention.")
+        logger.info(f"[TEST] Table {temp_table_name} restored successfully.")
 
         # PITRを有効化（リストアされたテーブルなので1日保持）
         enable_pitr(temp_table_name, is_restored_table=True)
-        logger.info(f"[TEST] PITR enabled for table {temp_table_name}")
+        logger.info(f"[TEST] PITR enabled for table {temp_table_name} with 1-day retention.")
 
         # S3へのエクスポート準備
         export_time = datetime.now(timezone.utc)
