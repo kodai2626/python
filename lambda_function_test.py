@@ -122,6 +122,46 @@ def cleanup_temp_table(table_name):
         logger.error(f"[TEST] Error during cleanup of table {table_name}: {e}")
         raise
 
+def enable_pitr(table_name, is_restored_table=False):
+    """
+    テーブルのPITRを有効にする関数
+    
+    Args:
+        table_name (str): PITRを有効にするテーブル名
+        is_restored_table (bool): リストアされたテーブルかどうか
+    """
+    try:
+        # バックアップ保持期間の設定
+        retention_days = 1 if is_restored_table else 35
+        logger.info(f"[TEST] Enabling PITR for table {table_name} with {retention_days}-day retention...")
+        
+        response = dynamodb_client.update_continuous_backups(
+            TableName=table_name,
+            PointInTimeRecoverySpecification={
+                'PointInTimeRecoveryEnabled': True,
+                'PointInTimeRecoveryWindowInDays': retention_days
+            }
+        )
+        logger.info(f"[TEST] PITR enabled with {retention_days}-day retention: {response}")
+        
+        # PITRが有効になるまで待機
+        while True:
+            response = dynamodb_client.describe_continuous_backups(TableName=table_name)
+            status = response['ContinuousBackupsDescription']['PointInTimeRecoveryDescription']['PointInTimeRecoveryStatus']
+            logger.info(f"[TEST] PITR status: {status}")
+            
+            if status == 'ENABLED':
+                break
+            elif status == 'ENABLING':
+                logger.info(f"[TEST] Waiting for PITR to be enabled...")
+                time.sleep(WAIT_TIME)
+            else:
+                raise Exception(f"Unexpected PITR status: {status}")
+                
+    except Exception as e:
+        logger.error(f"[TEST] Error enabling PITR for table {table_name}: {e}")
+        raise
+
 def lambda_handler(event, context):
     """
     検証用Lambda関数のメインハンドラー
@@ -157,14 +197,18 @@ def lambda_handler(event, context):
         table_description = wait_for_table_status(temp_table_name, 'ACTIVE')
         logger.info(f"[TEST] Table {temp_table_name} restored successfully.")
 
+        # PITRを有効化（リストアされたテーブルなので1日保持）
+        enable_pitr(temp_table_name, is_restored_table=True)
+        logger.info(f"[TEST] PITR enabled for restored table {temp_table_name} with 1-day retention")
+
         # S3へのエクスポート準備
         export_time = datetime.now(timezone.utc)
         s3_prefix = f"test/{temp_table_name}/{export_time.strftime('%Y/%m/%d/%H%M%S')}"  # テスト用のパスを追加
         logger.info(f"[TEST] Starting export to s3://{S3_BUCKET_NAME}/{s3_prefix}...")
 
-        # テーブルをS3にエクスポート（PITRを使用しない方法）
+        # テーブルをS3にエクスポート
         response_export = retry_with_backoff(
-            dynamodb_client.export_table_to_s3,
+            dynamodb_client.export_table_to_point_in_time,
             TableArn=table_description['Table']['TableArn'],
             S3Bucket=S3_BUCKET_NAME,
             S3Prefix=s3_prefix,
