@@ -164,7 +164,7 @@ def lambda_handler(event, context):
 
         # テーブルをS3にエクスポート（PITRを使用しない方法）
         response_export = retry_with_backoff(
-            dynamodb_client.export_table,
+            dynamodb_client.export_table_to_s3,
             TableArn=table_description['Table']['TableArn'],
             S3Bucket=S3_BUCKET_NAME,
             S3Prefix=s3_prefix,
