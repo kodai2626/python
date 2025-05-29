@@ -10,12 +10,12 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # 環境変数から設定を取得
-TABLE_NAME = os.environ.get('TABLE_NAME')
-BUCKET_NAME = os.environ.get('BUCKET_NAME')
+TABLE_NAME = os.environ.get('SOURCE_TABLE_NAME')
+BUCKET_NAME = os.environ.get('S3_BUCKET_NAME')
 
 # 必須の環境変数チェック
 if not TABLE_NAME or not BUCKET_NAME:
-    raise ValueError("環境変数 TABLE_NAME と BUCKET_NAME は必須です")
+    raise ValueError("環境変数 SOURCE_TABLE_NAME と S3_BUCKET_NAME は必須です")
 
 # AWSクライアントの初期化
 dynamodb = boto3.client('dynamodb')
