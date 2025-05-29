@@ -1,0 +1,85 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: '毎月29日の14:05（JST）にDynamoDBバックアップLambdaを実行するEventBridgeルール'
+
+Resources:
+  BackupEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: 毎月29日の14:05（JST）にDynamoDBバックアップを実行
+      ScheduleExpression: cron(5 5 29 * ? *)  # UTC 05:05 = JST 14:05
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt BackupLambdaFunction.Arn
+          Id: BackupLambdaTarget
+
+  BackupEventRulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref BackupLambdaFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt BackupEventRule.Arn
+
+  BackupLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: monthly-dynamodb-backup
+      Handler: hourly_backup_lambda.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.9
+      Timeout: 300
+      Environment:
+        Variables:
+          SOURCE_TABLE_NAME: !Ref SourceTableName
+          S3_BUCKET_NAME: !Ref BackupBucketName
+      Code:
+        ZipFile: |
+          # Lambda関数のコードは別途デプロイ
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBBackupPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:ExportTableToPointInTime
+                Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${SourceTableName}
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub arn:aws:s3:::${BackupBucketName}
+                  - !Sub arn:aws:s3:::${BackupBucketName}/*
+
+Parameters:
+  SourceTableName:
+    Type: String
+    Description: バックアップ対象のDynamoDBテーブル名
+
+  BackupBucketName:
+    Type: String
+    Description: バックアップを保存するS3バケット名
+
+Outputs:
+  EventRuleName:
+    Description: 作成されたEventBridgeルールの名前
+    Value: !Ref BackupEventRule
+
+  LambdaFunctionName:
+    Description: 作成されたLambda関数の名前
+    Value: !Ref BackupLambdaFunction 

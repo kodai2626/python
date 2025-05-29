@@ -1,0 +1,84 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: '15分おきに1時間前時点のDynamoDBバックアップを実行するLambda関数とEventBridgeルール'
+
+Resources:
+  HourlyBackupLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: hourly_backup_lambda.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          # Lambda関数のコードは別途アップロード
+      Runtime: python3.9
+      Timeout: 300
+      Environment:
+        Variables:
+          SOURCE_TABLE_NAME: !Ref SourceTableName
+          S3_BUCKET_NAME: !Ref BackupBucketName
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBExportPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:ExportTableToPointInTime
+                Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${SourceTableName}'
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::${BackupBucketName}'
+                  - !Sub 'arn:aws:s3:::${BackupBucketName}/*'
+
+  HourlyBackupScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: '15分おきに1時間前時点のDynamoDBバックアップを実行'
+      ScheduleExpression: 'rate(15 minutes)'
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt HourlyBackupLambda.Arn
+          Id: HourlyBackupLambdaTarget
+
+  LambdaPermissionForEventsToInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref HourlyBackupLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt HourlyBackupScheduleRule.Arn
+
+Parameters:
+  SourceTableName:
+    Type: String
+    Description: バックアップ対象のDynamoDBテーブル名
+
+  BackupBucketName:
+    Type: String
+    Description: バックアップを保存するS3バケット名
+
+Outputs:
+  LambdaFunctionArn:
+    Description: Lambda関数のARN
+    Value: !GetAtt HourlyBackupLambda.Arn
+
+  EventBridgeRuleArn:
+    Description: EventBridgeルールのARN
+    Value: !GetAtt HourlyBackupScheduleRule.Arn 

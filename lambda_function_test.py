@@ -195,10 +195,6 @@ def lambda_handler(event, context):
         # テーブルが完全に利用可能になるまで少し待機
         time.sleep(WAIT_TIME)
 
-        # PITRを有効化
-        enable_pitr(temp_table_name)
-        logger.info(f"[TEST] PITR enabled for table {temp_table_name}.")
-
         # S3へのエクスポート準備
         export_time = datetime.now(timezone.utc)
         s3_prefix = f"test/{temp_table_name}/{export_time.strftime('%Y/%m/%d/%H%M%S')}"  # テスト用のパスを追加
