@@ -23,15 +23,15 @@ s3 = boto3.client('s3')
 
 def lambda_handler(event, context):
     try:
-        # 1日前の日時を計算（JST）
+        # 1時間前の日時を計算（JST）
         jst = tz.gettz('Asia/Tokyo')
         now = datetime.now(jst)
-        one_day_ago = now - timedelta(days=1)
+        one_hour_ago = now - timedelta(hours=1)
         
         # タイムスタンプをISO形式に変換
-        export_time = one_day_ago.isoformat()
+        export_time = one_hour_ago.isoformat()
         
-        logger.info(f"Starting export for table {TABLE_NAME} at {export_time}")
+        logger.info(f"1時間前の時点（{export_time}）のバックアップをエクスポート開始: テーブル {TABLE_NAME}")
         
         # DynamoDBのエクスポートを開始
         response = dynamodb.export_table_to_point_in_time(
@@ -43,12 +43,12 @@ def lambda_handler(event, context):
         
         # エクスポートの状態を確認
         export_arn = response['ExportDescription']['ExportArn']
-        logger.info(f"Export started successfully. Export ARN: {export_arn}")
+        logger.info(f"エクスポート開始成功。Export ARN: {export_arn}")
         
         return {
             'statusCode': 200,
             'body': json.dumps({
-                'message': 'エクスポートを開始しました',
+                'message': '1時間前の時点のバックアップエクスポートを開始しました',
                 'exportArn': export_arn,
                 'exportTime': export_time,
                 's3Location': f's3://{BUCKET_NAME}'
