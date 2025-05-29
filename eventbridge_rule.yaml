@@ -1,85 +1,53 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: '毎月29日の14:05（JST）にDynamoDBバックアップLambdaを実行するEventBridgeルール'
+Description: >-
+  CloudFormation template to create an Amazon EventBridge rule 
+  that triggers an existing Lambda function for monthly DynamoDB backups 
+  on the 29th of each month at 14:05 JST (05:05 UTC).
+
+Parameters:
+  ExistingLambdaFunctionArn: # パラメータ名を変更し、既存のLambda ARNを受け取る
+    Type: String
+    Description: The ARN of the existing Lambda function to be triggered.
+    # 例: arn:aws:lambda:ap-northeast-1:123456789012:function:DynamoDBPITRtoS3Export
+  ScheduleCronExpression:
+    Type: String
+    Description: >-
+      UTC Cron expression for the schedule. 
+      Default is 'cron(5 5 29 * ? *)' for 05:05 AM UTC on the 29th of every month (14:05 JST).
+    Default: 'cron(5 5 29 * ? *)' # 毎月29日 05:05 UTC (JST 14:05)
+  EventRuleName:
+    Type: String
+    Description: A name for the EventBridge rule.
+    Default: TriggerDynamoDBMonthlyBackupLambdaRule # ルール名をより具体的に変更
+  TargetId:
+    Type: String
+    Description: A unique ID for the target (Lambda function) within the rule.
+    Default: MonthlyBackupLambdaTarget # ターゲットIDをシンプルに
 
 Resources:
   BackupEventRule:
     Type: AWS::Events::Rule
     Properties:
-      Description: 毎月29日の14:05（JST）にDynamoDBバックアップを実行
-      ScheduleExpression: cron(5 5 29 * ? *)  # UTC 05:05 = JST 14:05
+      Name: !Ref EventRuleName
+      Description: !Sub 'Triggers Lambda ${ExistingLambdaFunctionArn} for DynamoDB backup on the 29th of each month at 14:05 JST (05:05 UTC).'
+      ScheduleExpression: !Ref ScheduleCronExpression
       State: ENABLED
       Targets:
-        - Arn: !GetAtt BackupLambdaFunction.Arn
-          Id: BackupLambdaTarget
+        - Arn: !Ref ExistingLambdaFunctionArn # パラメータで渡された既存LambdaのARNを使用
+          Id: !Ref TargetId
 
   BackupEventRulePermission:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
-      FunctionName: !Ref BackupLambdaFunction
+      FunctionName: !Ref ExistingLambdaFunctionArn # パラメータで渡された既存LambdaのARN（または名前）を使用
       Principal: events.amazonaws.com
       SourceArn: !GetAtt BackupEventRule.Arn
 
-  BackupLambdaFunction:
-    Type: AWS::Lambda::Function
-    Properties:
-      FunctionName: monthly-dynamodb-backup
-      Handler: hourly_backup_lambda.lambda_handler
-      Role: !GetAtt LambdaExecutionRole.Arn
-      Runtime: python3.9
-      Timeout: 300
-      Environment:
-        Variables:
-          SOURCE_TABLE_NAME: !Ref SourceTableName
-          S3_BUCKET_NAME: !Ref BackupBucketName
-      Code:
-        ZipFile: |
-          # Lambda関数のコードは別途デプロイ
-
-  LambdaExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: DynamoDBBackupPolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - dynamodb:ExportTableToPointInTime
-                Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${SourceTableName}
-              - Effect: Allow
-                Action:
-                  - s3:PutObject
-                  - s3:GetObject
-                  - s3:ListBucket
-                Resource:
-                  - !Sub arn:aws:s3:::${BackupBucketName}
-                  - !Sub arn:aws:s3:::${BackupBucketName}/*
-
-Parameters:
-  SourceTableName:
-    Type: String
-    Description: バックアップ対象のDynamoDBテーブル名
-
-  BackupBucketName:
-    Type: String
-    Description: バックアップを保存するS3バケット名
-
 Outputs:
-  EventRuleName:
-    Description: 作成されたEventBridgeルールの名前
+  EventRuleName: # Outputsのキー名をシンプルにしました
+    Description: The name of the created EventBridge rule.
     Value: !Ref BackupEventRule
-
-  LambdaFunctionName:
-    Description: 作成されたLambda関数の名前
-    Value: !Ref BackupLambdaFunction 
+  EventRuleArn: # ARNも出力
+    Description: The ARN of the created EventBridge rule.
+    Value: !GetAtt BackupEventRule.Arn
